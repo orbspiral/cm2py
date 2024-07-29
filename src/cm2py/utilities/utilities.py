@@ -3,8 +3,9 @@
 Additional utilities for working with cm2py.
 """
 
-from ..cm2py import *
-
+from cm2py import Save
+import string, struct, math
+from typing import Literal, Callable
 
 def generateCLA(
     numBits: int,
@@ -199,10 +200,7 @@ def encodeToMemory(
             code += base64[(v >> 12) & 0x3F]
         code += "AAA" * (4096 - len(data))
     elif memoryType == "huge":
-        raise (
-            NotImplementedError,
-            "Huge Memory uses full utf8 to represent the values, which don't work well with Roblox yet. When the format gets updated or full utf8 is supported, this function will be updated.",
-        )
+        raise NotImplementedError
     return code
 
 

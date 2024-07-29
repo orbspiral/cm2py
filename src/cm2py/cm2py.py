@@ -16,160 +16,81 @@ __maintainer__ = "SKM GEEK"
 __status__ = "Production"
 __version__ = "0.3.10"
 
-from uuid import uuid4
-import math
-import regex as re
-from typing import Literal, Callable
-import string
-import struct
+from uuid import uuid4, UUID
+import re
 
+nan = float("nan")
 
 class Block:
-    __initialised = False
-
-    def __init__(self, blockId, pos, state=False, properties=None):
-        assert (
-            isinstance(blockId, int) and 0 <= blockId <= 19
-        ), "blockId must be an integer between 0 and 19"
-        assert (
-            isinstance(pos, tuple)
-            and len(pos) == 3
-            and (isinstance(pos[0], (float, int)))
-            and (isinstance(pos[1], (float, int)))
-            and (isinstance(pos[2], (float, int)))
-        ), "pos must be a 3d tuple of integers or floats"
-        assert isinstance(state, bool), "state must be a boolean"
-        assert (
-            isinstance(properties, list) or properties is None
-        ), "properties must be a list of numbers, or None."
+    def __init__(self, blockId: int, pos: tuple[float,float,float], state: bool = False, properties: list[float] = []):
+        assert 0 <= blockId <= 19, "blockId must be between 0 and 19"
         self.blockId = blockId
         self.pos = pos
-        self.x = self.pos[0]
-        self.y = self.pos[1]
-        self.z = self.pos[2]
         self.state = state
         self.properties = properties
-        self.uuid = str(uuid4())
+        self.uuid = uuid4()
 
-        self.__initialised = True
+    def move(self,x = nan,y = nan,z = nan):
+        """Move the block"""
+        self.pos = (self.pos[0] if x == nan else x,self.pos[1] if y == nan else y,self.pos[2] if z == nan else z)
 
-    def __setattr__(self, name, value):
-        self.__dict__[name] = value
-        if not self.__initialised:
-            return
-        if name == "pos":
-            self.__dict__["x"] = self.pos[0]
-            self.__dict__["y"] = self.pos[1]
-            self.__dict__["z"] = self.pos[2]
-        elif name in ["x", "y", "z"]:
-            self.__dict__["pos"] = (self.x, self.y, self.z)
-
-
-class Connection:
-    def __init__(self, source, target):
-        assert isinstance(source, Block), "source must be a Block object"
-        assert isinstance(target, Block), "target must be a Block object"
-        self.source = source
-        self.target = target
+    def __str__(self) -> str:
+        props = [str(p) for p in self.properties]
+        pos = [str(int(x)) if x.is_integer() else str(x) for x in self.pos]
+        return f"{self.blockId},{self.state},{','.join(pos)}{',' + '+'.join(props) if len(self.properties) > 0 else ''}"
 
 
 class Save:
     """A class to represent a save, which can be modified."""
 
     def __init__(self):
-        self.blocks = {}
-        self.connections = {}
-        self.blockCount = 0
-        self.connectionCount = 0
+        self.blocks: dict[UUID,Block] = {}
+        self.connections: dict[tuple[UUID,UUID],tuple[Block,Block]] = {}
 
-    def addBlock(
-        self,
-        blockId: int,
-        pos: tuple[float | int, float | int, float | int],
-        state: bool = False,
-        properties: list[int | float] | None = None,
-        snapToGrid: bool = True,
-    ) -> Block:
+    def addBlock(self, blockId: int, pos: tuple[float, float, float],state: bool = False,properties: list[float] = [], snapToGrid: bool = True,) -> Block:
         """Add a block to the save."""
-        if snapToGrid:
-            newBlock = Block(
-                blockId,
-                tuple([int(math.floor(i)) for i in pos]),
-                state=state,
-                properties=properties,
-            )
-        else:
-            newBlock = Block(blockId, pos, state=state, properties=properties)
+        newBlock = Block(blockId, (int((pos[0])), int((pos[1])), int(pos[2])) if snapToGrid else pos, state, properties)
         self.blocks[newBlock.uuid] = newBlock
-        self.blockCount += 1
         return newBlock
 
-    def addConnection(self, source: Block, target: Block) -> Connection:
+    def addConnection(self, source: Block, target: Block) -> tuple[Block,Block]:
         """Add a connection to the save."""
-        newConnection = Connection(source, target)
-        if newConnection.target.uuid in self.connections:
-            self.connections[newConnection.target.uuid].append(newConnection)
-        else:
-            self.connections[newConnection.target.uuid] = [newConnection]
-        self.connectionCount += 1
-        return newConnection
+        new_connection = (source,target)
+        self.connections[(source.uuid,target.uuid)] = new_connection
+        return new_connection
 
     def exportSave(self) -> str:
         """Export the save to a Circuit Maker 2 save string."""
-        string = ""
-        blockIndexes = {}
-        index = 0
+        indexes: dict[UUID,int] = {}
+        count = 1
+        blockstrings: list[str] = []
+        connectionstrings: list[str] = []
 
-        assert self.blockCount > 0, "Saves with less than 1 block cannot be exported."
+        for uuid,block in self.blocks.items():
+            indexes[uuid] = count
+            blockstrings.append(str(block))
+            count += 1
 
-        for b in self.blocks.values():
-            p = "+".join(str(v) for v in b.properties) if b.properties else ""
-            string += f"{b.blockId},{int(b.state)},{b.x},{b.y},{b.z},{p};"
-            blockIndexes[b.uuid] = index
-            index += 1
+        for connect in self.connections:
+            connectionstrings.append(f"{indexes[connect[0]]},{indexes[connect[1]]}")
+        
+        return f"{';'.join(blockstrings)}?{';'.join(connectionstrings)}??"
 
-        string = string[:-1] + "?"
-        for c in self.connections.values():
-            for n in c:
-                string += (
-                    f"{blockIndexes[n.source.uuid]+1},{blockIndexes[n.target.uuid]+1};"
-                )
-        if self.connectionCount > 0:
-            string = string[:-1]
-        string = string + "??"  # TODO: Custom build support & sign data support
-        return string
-
-    def deleteBlock(self, blockRef: Block) -> None:
+    def deleteBlock(self, blockRef: Block):
         """Delete a block from the save."""
-        assert isinstance(blockRef, Block), "blockRef must be a Block object"
         assert blockRef.uuid in self.blocks, "block does not exist in save"
-        for c in self.connections.values():
-            for n in c:
-                if n.source.uuid == blockRef.uuid or n.target.uuid == blockRef.uuid:
-                    del self.connections[n.target.uuid][
-                        self.connections[n.target.uuid].index(n)
-                    ]
-                    break
+        for c in self.connections.keys():
+            if c[0] == blockRef.uuid:
+                del self.connections[(blockRef.uuid,c[1])]
+            elif c[1] == blockRef.uuid:
+                del self.connections[(c[0],blockRef.uuid)]
         del self.blocks[blockRef.uuid]
-        self.blockCount -= 1
-        return
 
-    def deleteConnection(self, connectionRef: Connection) -> None:
+    def deleteConnection(self, source: Block,target: Block):
         """Delete a connection from the save."""
-        assert isinstance(
-            connectionRef, Connection
-        ), "connectionRef must be a Connection object"
-        assert connectionRef in (n for c in self.connections.values() for n in c)
-        for c in self.connections.values():
-            for n in c:
-                if connectionRef == n:
-                    del self.connections[n.target.uuid][
-                        self.connections[n.target.uuid].index(n)
-                    ]
-        self.connectionCount -= 1
+        del self.connections[(source.uuid,target.uuid)]
 
-
-def validateSave(string: str) -> re.Match | None:
+def validateSave(string: str) -> bool:
     """Check whether a string is a valid savestring or not."""
     # fmt: off
     regex = (
@@ -208,7 +129,7 @@ def validateSave(string: str) -> re.Match | None:
         r"(?![\d\w,;?+])$"
     )
     # fmt: on
-    return re.match(regex, string)
+    return re.match(regex, string) != None
 
 
 def importSave(string: str, snapToGrid: bool = True) -> Save:
@@ -217,40 +138,17 @@ def importSave(string: str, snapToGrid: bool = True) -> Save:
 
     newSave = Save()
 
-    sections = string.split("?")
-    blockString = sections[0].split(";")
-    connectionString = sections[1].split(";")
+    blockstring,connectionstring,buildings,sign = string.split("?")
+    blocks: list[Block] = []
 
-    blockVals = [
-        [
-            (
-                None
-                if not v
-                else (
-                    [float(a) for a in v.split("+")]
-                    if "+" in v or p == 5
-                    else float(v) if (v and p != 0) else int(v)
-                )
-            )
-            for p, v in enumerate(i.split(","))
-        ]
-        for i in blockString
-    ]
-    connections = [[int(v) for v in i.split(",")] for i in connectionString if i]
+    for block in blockstring.split(";"):
+        block_id,state,x,y,z,properties = block.split(",")
+        props = [float(p) for p in properties.split("+")]
+        newblock = newSave.addBlock(int(block_id), (float(x),float(y),float(z)), state == "1",props, snapToGrid)
+        blocks.append(newblock)
 
-    blocks = []
-    for b in blockVals:
-        blocks.append(
-            newSave.addBlock(
-                b[0],
-                (b[2] or 0, b[3] or 0, b[4] or 0),
-                state=bool(b[1]),
-                properties=b[5],
-                snapToGrid=snapToGrid,
-            )
-        )
-
-    for c in connections:
-        newSave.addConnection(blocks[c[0] - 1], blocks[c[1] - 1])
+    for connection in connectionstring.split(";"):
+        source,target = connection.split(",")
+        newSave.addConnection(blocks[int(source)],blocks[int(target)])
 
     return newSave

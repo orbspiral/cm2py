@@ -1,5 +1,3 @@
-import pytest
-
 from src import cm2py as cm2
 
 
@@ -76,7 +74,7 @@ def test_deleteConnection():
 
     c1 = save.addConnection(b1, b2)
 
-    save.deleteConnection(c1)
+    save.deleteConnection(c1[0],c1[1])
 
     save.exportSave()
 
@@ -94,17 +92,16 @@ def test_move():
 
     b1 = save.addBlock(cm2.OR, (1, 2, 3))
     assert b1.pos == (1, 2, 3)
-    assert b1.x == 1 and b1.y == 2 and b1.z == 3
 
     b1.pos = (4, 5, 6)
     assert b1.pos == (4, 5, 6)
-    assert b1.x == 4 and b1.y == 5 and b1.z == 6
 
-    b1.x = 7
-    b1.y = 8
-    b1.z = 9
+    b1.move(x=7)
+    assert b1.pos == (7, 5, 6)
+    b1.move(y=8)
+    assert b1.pos == (7, 8, 6)
+    b1.move(z=9)
     assert b1.pos == (7, 8, 9)
-    assert b1.x == 7 and b1.y == 8 and b1.z == 9
 
 
 def test_importSave():
